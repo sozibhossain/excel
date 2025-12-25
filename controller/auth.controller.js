@@ -1,388 +1,166 @@
 import httpStatus from "http-status";
+import { v4 as uuidv4 } from "uuid";
 import AppError from "../errors/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
+import env from "../config/env.js";
+import { User, RoleEnum, LanguageEnum } from "../model/user.model.js";
+import { RefreshToken } from "../model/refreshToken.model.js";
+import { hashPassword, verifyPassword, hashToken } from "../utils/crypto.js";
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/tokens.js";
+import { durationToDate } from "../utils/duration.js";
 import sendResponse from "../utils/sendResponse.js";
-import { createToken, verifyToken } from "../utils/authToken.js";
-import { generateOTP } from "../utils/commonMethod.js";
-import { sendEmail } from "../utils/sendEmail.js";
-import { User } from "../model/user.model.js";
 
-/**
- * Helper: Generate access & refresh tokens for a user.
- */
-const generateAuthTokens = (user) => {
-  const payload = { _id: user._id, email: user.email, role: user.role };
+const sanitizeUser = (userDoc) => {
+  const user = userDoc.toObject({ getters: true });
+  delete user.passwordHash;
+  delete user.deletedAt;
+  return user;
+};
 
-  const accessToken = createToken(
-    payload,
-    process.env.JWT_ACCESS_SECRET,
-    process.env.JWT_ACCESS_EXPIRES_IN
-  );
+const ensureRolePermissions = (requestedRole, actorRole) => {
+  if (!requestedRole || requestedRole === "CUSTOMER") return;
+  if (actorRole !== "ADMIN") {
+    throw new AppError(httpStatus.FORBIDDEN, "Only admins can create privileged accounts");
+  }
+};
 
-  const refreshToken = createToken(
-    payload,
-    process.env.JWT_REFRESH_SECRET,
-    process.env.JWT_REFRESH_EXPIRES_IN
-  );
+const createSession = async (user) => {
+  const tokenId = uuidv4();
+  const accessToken = signAccessToken({ sub: user._id, role: user.role });
+  const refreshToken = signRefreshToken({ sub: user._id, role: user.role, tokenId });
+
+  await RefreshToken.create({
+    userId: user._id,
+    tokenId,
+    tokenHash: hashToken(refreshToken),
+    expiresAt: durationToDate(env.JWT_REFRESH_EXPIRES_IN),
+  });
 
   return { accessToken, refreshToken };
 };
 
-/**
- * Helper: Set refresh token cookie (recommended for web clients).
- */
-const setRefreshCookie = (res, refreshToken) => {
-  res.cookie("refreshToken", refreshToken, {
-    secure: true,
-    httpOnly: true,
-    sameSite: "none",
-    maxAge: 1000 * 60 * 60 * 24 * 365, // 1 year
-  });
-};
-
-/**
- * @desc    Register a new user (email OTP verification required)
- * @route   POST /api/v1/auth/register
- * @access  Public
- */
 export const register = catchAsync(async (req, res) => {
-  const { phone, name, email, password, confirmPassword } = req.body;
+  const normalizedRole = (req.body.role || "CUSTOMER").toUpperCase();
+  const normalizedLanguage = (req.body.language || "EN").toUpperCase();
+  ensureRolePermissions(normalizedRole, req.user?.role);
 
-  // Basic validation
-  if (!email || !password || !confirmPassword) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Please fill in all fields");
-  }
-
-  if (password !== confirmPassword) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Passwords do not match");
-  }
-
-  // Check duplicate email
   const existing = await User.findOne({ email });
   if (existing) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Email already exists, please try another email"
-    );
+    throw new AppError(httpStatus.CONFLICT, "User already exists with this email");
   }
 
-  // Create user (mark as NOT verified)
+  if (!RoleEnum.includes(normalizedRole)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid role supplied");
+  }
+  if (!LanguageEnum.includes(normalizedLanguage)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid language supplied");
+  }
+
   const user = await User.create({
-    phone,
-    name,
+    name: req.body.name,
     email,
-    password,
-    verificationInfo: { token: "", verified: false },
+    phone: req.body.phone,
+    language: normalizedLanguage,
+    role: normalizedRole,
+    passwordHash: await hashPassword(req.body.password),
   });
-
-  // Optionally send OTP immediately on register (recommended)
-  const otp = generateOTP();
-  const otpToken = createToken(
-    { otp },
-    process.env.OTP_SECRET,
-    process.env.OTP_EXPIRE
-  );
-
-  user.verificationInfo.token = otpToken;
-  await user.save();
-
-  await sendEmail(user.email, "Verify your account", `Your OTP is ${otp}`);
 
   return sendResponse(res, {
     statusCode: httpStatus.CREATED,
-    success: true,
-    message: "User registered successfully. Please verify OTP sent to email.",
-    data: { email: user.email },
+    message: "User registered successfully",
+    data: { user: sanitizeUser(user) },
   });
 });
 
-/**
- * @desc    Verify email OTP
- * @route   POST /api/v1/auth/verify-email
- * @access  Public
- */
-export const verifyEmail = catchAsync(async (req, res) => {
-  const { email, otp } = req.body;
-
-  if (!email || !otp) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Email and OTP are required");
-  }
-
-  const user = await User.findOne({ email });
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, "User not found");
-
-  const token = user.verificationInfo?.token;
-  if (!token) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Verification token missing");
-  }
-
-  let decoded;
-  try {
-    decoded = verifyToken(token, process.env.OTP_SECRET);
-  } catch (err) {
-    throw new AppError(httpStatus.BAD_REQUEST, "OTP expired or invalid");
-  }
-
-  if (String(decoded.otp) !== String(otp)) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Invalid OTP");
-  }
-
-  user.verificationInfo.verified = true;
-  user.verificationInfo.token = "";
-  await user.save();
-
-  return sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "Email verified successfully",
-    data: null,
-  });
-});
-
-/**
- * @desc    Login user (blocks login if email not verified)
- * @route   POST /api/v1/auth/login
- * @access  Public
- */
 export const login = catchAsync(async (req, res) => {
   const { email, password } = req.body;
-
-  if (!email || !password) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Email and password are required");
+  const user = await User.findOne({ email }).select("+passwordHash +isActive +role");
+  if (!user || !user.isActive) {
+    throw new AppError(httpStatus.UNAUTHORIZED, "Invalid credentials or inactive account");
   }
 
-  const user = await User.isUserExistsByEmail(email);
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, "User not found");
-
-  const isMatched =
-    user?.password && (await User.isPasswordMatched(password, user.password));
-
-  if (!isMatched) {
-    throw new AppError(httpStatus.UNAUTHORIZED, "Invalid email or password");
+  const matched = await verifyPassword(user.passwordHash, password);
+  if (!matched) {
+    throw new AppError(httpStatus.UNAUTHORIZED, "Invalid credentials");
   }
 
-  // Block login if not verified (send OTP again)
-  if (!user.verificationInfo?.verified) {
-    const otp = generateOTP();
-    const otpToken = createToken(
-      { otp },
-      process.env.OTP_SECRET,
-      process.env.OTP_EXPIRE
-    );
-
-    user.verificationInfo.token = otpToken;
-    await user.save();
-
-    await sendEmail(user.email, "Verify your account", `Your OTP is ${otp}`);
-
-    return sendResponse(res, {
-      statusCode: httpStatus.FORBIDDEN,
-      success: false,
-      message: "Email is not verified. OTP sent again to your email.",
-      data: { email: user.email },
-    });
-  }
-
-  // Generate tokens
-  const { accessToken, refreshToken } = generateAuthTokens(user);
-
-  // Store refresh token in DB
-  user.refreshToken = refreshToken;
-  await user.save();
-
-  // Set cookie (optional but recommended)
-  setRefreshCookie(res, refreshToken);
+  const tokens = await createSession(user);
 
   return sendResponse(res, {
     statusCode: httpStatus.OK,
-    success: true,
-    message: "User logged in successfully",
+    message: "Login successful",
     data: {
-      accessToken,
-      role: user.role,
-      _id: user._id,
-      user,
+      user: sanitizeUser(user),
+      tokens,
     },
   });
 });
 
-/**
- * @desc    Send OTP for forget password
- * @route   POST /api/v1/auth/forget-password
- * @access  Public
- */
-export const forgetPassword = catchAsync(async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) throw new AppError(httpStatus.BAD_REQUEST, "Email is required");
-
-  const user = await User.isUserExistsByEmail(email);
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, "User not found");
-
-  const otp = generateOTP();
-  const otpToken = createToken(
-    { otp },
-    process.env.OTP_SECRET,
-    process.env.OTP_EXPIRE
-  );
-
-  user.password_reset_token = otpToken;
-  await user.save();
-
-  await sendEmail(user.email, "Reset Password", `Your OTP is ${otp}`);
-
-  return sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "OTP sent to your email successfully",
-    data: null,
-  });
-});
-
-/**
- * @desc    Reset password using OTP
- * @route   POST /api/v1/auth/reset-password
- * @access  Public
- */
-export const resetPassword = catchAsync(async (req, res) => {
-  const { email, otp, password } = req.body;
-
-  if (!email || !otp || !password) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Email, OTP and new password are required"
-    );
+export const refreshSession = catchAsync(async (req, res) => {
+  const token = req.body?.refreshToken || req.cookies?.refreshToken;
+  if (!token) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Refresh token is required");
   }
 
-  const user = await User.isUserExistsByEmail(email);
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, "User not found");
-
-  if (!user.password_reset_token) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Reset token missing or expired");
-  }
-
-  let decoded;
+  let payload;
   try {
-    decoded = verifyToken(user.password_reset_token, process.env.OTP_SECRET);
-  } catch (err) {
-    throw new AppError(httpStatus.BAD_REQUEST, "OTP expired or invalid");
-  }
-
-  if (String(decoded.otp) !== String(otp)) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Invalid OTP");
-  }
-
-  user.password = password;
-  user.password_reset_token = undefined;
-  await user.save();
-
-  return sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "Password reset successfully",
-    data: null,
-  });
-});
-
-/**
- * @desc    Change password (requires auth)
- * @route   PATCH /api/v1/auth/change-password
- * @access  Private
- */
-export const changePassword = catchAsync(async (req, res) => {
-  const { oldPassword, newPassword, confirmPassword } = req.body;
-
-  if (!oldPassword || !newPassword || !confirmPassword) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Old password, new password and confirm password are required"
-    );
-  }
-
-  if (newPassword !== confirmPassword) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Passwords do not match");
-  }
-
-  if (oldPassword === newPassword) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "New password must be different from old password"
-    );
-  }
-
-  const user = await User.findById(req.user?._id).select("+password");
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, "User not found");
-
-  const matched = await User.isPasswordMatched(oldPassword, user.password);
-  if (!matched) throw new AppError(httpStatus.UNAUTHORIZED, "Current password wrong");
-
-  user.password = newPassword;
-  await user.save();
-
-  return sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "Password changed successfully",
-    data: null,
-  });
-});
-
-/**
- * @desc    Refresh access token using refresh token
- * @route   POST /api/v1/auth/refresh-token
- * @access  Public (uses refresh token)
- */
-export const refreshToken = catchAsync(async (req, res) => {
-  // Prefer cookie refresh token; fallback to body
-  const token = req.cookies?.refreshToken || req.body?.refreshToken;
-
-  if (!token) throw new AppError(httpStatus.BAD_REQUEST, "Refresh token is required");
-
-  const decoded = verifyToken(token, process.env.JWT_REFRESH_SECRET);
-
-  const user = await User.findById(decoded._id);
-  if (!user || user.refreshToken !== token) {
+    payload = verifyRefreshToken(token);
+  } catch (error) {
     throw new AppError(httpStatus.UNAUTHORIZED, "Invalid refresh token");
   }
 
-  const { accessToken, refreshToken: newRefresh } = generateAuthTokens(user);
+  const existing = await RefreshToken.findOne({ tokenId: payload.tokenId });
+  if (!existing || existing.isRevoked || existing.expiresAt < new Date()) {
+    throw new AppError(httpStatus.UNAUTHORIZED, "Refresh token expired");
+  }
 
-  user.refreshToken = newRefresh;
-  await user.save();
+  if (existing.tokenHash !== hashToken(token)) {
+    existing.isRevoked = true;
+    await existing.save();
+    throw new AppError(httpStatus.UNAUTHORIZED, "Token reuse detected");
+  }
 
-  setRefreshCookie(res, newRefresh);
+  existing.isRevoked = true;
+  await existing.save();
+
+  const user = await User.findById(payload.sub);
+  if (!user) {
+    throw new AppError(httpStatus.UNAUTHORIZED, "User no longer exists");
+  }
+
+  const tokens = await createSession(user);
 
   return sendResponse(res, {
     statusCode: httpStatus.OK,
-    success: true,
-    message: "Token refreshed successfully",
-    data: { accessToken },
+    message: "Session refreshed",
+    data: { user: sanitizeUser(user), tokens },
   });
 });
 
-/**
- * @desc    Logout user (invalidate refresh token)
- * @route   POST /api/v1/auth/logout
- * @access  Private
- */
 export const logout = catchAsync(async (req, res) => {
-  const userId = req.user?._id;
-
-  if (userId) {
-    await User.findByIdAndUpdate(userId, { refreshToken: "" }, { new: true });
+  const token = req.body?.refreshToken || req.cookies?.refreshToken;
+  if (!token) {
+    res.clearCookie("refreshToken");
+    return res.status(httpStatus.NO_CONTENT).send();
+  }
+  try {
+    const payload = verifyRefreshToken(token);
+    await RefreshToken.updateMany({ tokenId: payload.tokenId }, { isRevoked: true });
+  } catch (error) {
+    // ignore errors, logout is best-effort
   }
 
-  // Clear cookie as well
-  res.clearCookie("refreshToken", {
-    secure: true,
-    httpOnly: true,
-    sameSite: "none",
-  });
+  res.clearCookie("refreshToken");
+  return res.status(httpStatus.NO_CONTENT).send();
+});
 
+export const me = catchAsync(async (req, res) => {
+  if (!req.user) {
+    throw new AppError(httpStatus.UNAUTHORIZED, "Not authenticated");
+  }
   return sendResponse(res, {
     statusCode: httpStatus.OK,
-    success: true,
-    message: "Logged out successfully",
-    data: null,
+    message: "Profile loaded",
+    data: { user: sanitizeUser(req.user) },
   });
 });

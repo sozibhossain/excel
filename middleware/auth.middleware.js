@@ -1,35 +1,30 @@
-import jwt from "jsonwebtoken";
-import httpStatus from "http-status";
 import AppError from "../errors/AppError.js";
-import { User } from "./../model/user.model.js";
+import { verifyAccessToken } from "../utils/tokens.js";
+import { User } from "../model/user.model.js";
 
-export const protect = async (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) throw new AppError(httpStatus.NOT_FOUND, "Token not found");
+export const protect =
+  (optional = false) =>
+  async (req, res, next) => {
+    const token = req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.split(" ")[1]
+      : undefined;
 
-  try {
-    const decoded = await jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    // console.log(decoded)
-    const user = await User.findById(decoded._id);
-    if (user && (await User.isOTPVerified(user._id))) {
-      req.user = user;
+    if (!token) {
+      if (optional) {
+        return next();
+      }
+      throw new AppError(401, "Authentication required");
     }
-    next();
-  } catch (err) {
-    throw new AppError(401, "Invalid token");
-  }
-};
 
-export const isAdmin = (req, res, next) => {
-  if (req.user?.role !== "admin") {
-    throw new AppError(403, "Access denied. You are not an admin.");
-  }
-  next();
-};
-
-export const isDriver = (req, res, next) => {
-  if (req.user?.role !== "driver") {
-    throw new AppError(403, "Access denied. You are not an driver.");
-  }
-  next();
-};
+    try {
+      const payload = verifyAccessToken(token);
+      const user = await User.findById(payload.sub);
+      if (!user || !user.isActive) {
+        throw new Error("inactive");
+      }
+      req.user = user;
+      return next();
+    } catch (error) {
+      return next(new AppError(401, "Invalid or expired token"));
+    }
+  };

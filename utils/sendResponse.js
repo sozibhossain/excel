@@ -1,8 +1,9 @@
 const sendResponse = (res, data) => {
-  res.status(data?.statusCode).json({
-    success: data.success,
+  res.status(data?.statusCode || 200).json({
+    success: data.success ?? true,
     message: data.message,
     data: data.data,
+    meta: data.meta,
   });
 };
 

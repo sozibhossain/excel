@@ -1,119 +1,23 @@
 import mongoose, { Schema } from "mongoose";
-import bcrypt from "bcryptjs";
+
+export const RoleEnum = ["ADMIN", "AGENT", "CUSTOMER"];
+export const LanguageEnum = ["EN", "BN"];
 
 const userSchema = new Schema(
   {
-    name: { type: String },
-    email: {
-      type: String,
-      trim: true,
-    },
-    password: { type: String, select: false },
-    username: {
-      type: String,
-      trim: true,
-    },
-    phone: {
-      type: String,
-      trim: true,
-    },
-    selfDescription: { type: String, maxlength: 1000 },
-    dob: {
-      type: Date,
-    },
-    interests: [
-      {
-        type: String,
-        maxlength: 100,
-      },
-    ],
-    avatar: {
-      public_id: { type: String, default: "" },
-      url: { type: String, default: "" },
-    },
-    profilePhotos: [
-      {
-        public_id: { type: String, required: true },
-        url: { type: String, required: true },
-      },
-    ],
-    location: { type: String },
-    addresses: {
-      type: Array,
-      default: [],
-    },
-    notifications: {
-      type: Boolean,
-      default: true,
-    },
-    language: {
-      type: String,
-      default: "en",
-    },
-    country: {
-      type: String,
-      default: "Kuwait",
-    },
-    referralCode: {
-      type: String,
-      default: () => Math.random().toString(36).substr(2, 9).toUpperCase(),
-    },
-    role: {
-      type: String,
-      enum: ["customer", "admin"],
-      default: "customer",
-    },
-    verificationInfo: {
-      verified: { type: Boolean, default: false },
-      token: { type: String, default: "" },
-    },
-    password_reset_token: { type: String, default: "" },
-    fine: { type: Number, default: 0 },
-    refreshToken: { type: String, default: "" },
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    phone: { type: String, unique: true, sparse: true, trim: true },
+    passwordHash: { type: String, required: true, select: false },
+    role: { type: String, enum: RoleEnum, default: "CUSTOMER" },
+    language: { type: String, enum: LanguageEnum, default: "EN" },
+    isActive: { type: Boolean, default: true },
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
-userSchema.pre("save", async function (next) {
-  if (this.isModified("password")) {
-    const saltRounds = Number(process.env.bcrypt_salt_round) || 10;
-    this.password = await bcrypt.hash(this.password, saltRounds);
-  }
-  if (this.isModified("addresses")) {
-    let defaultFound = false;
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
-    this.addresses = this.addresses.map((addr) => {
-      if (addr.isDefault) {
-        if (!defaultFound) {
-          defaultFound = true;
-          return addr;
-        }
-        addr.isDefault = false;
-      }
-      return addr;
-    });
-  }
-  next();
-});
-
-userSchema.statics.isUserExistsByEmail = async function (email) {
-  return await this.findOne({ email }).select("+password");
-};
-
-userSchema.statics.isOTPVerified = async function (id) {
-  const user = await this.findById(id).select("+verificationInfo");
-  return user?.verificationInfo.verified;
-};
-
-userSchema.statics.isPasswordMatched = async function (
-  plainTextPassword,
-  hashPassword
-) {
-  return await bcrypt.compare(plainTextPassword, hashPassword);
-};
-
-userSchema.statics.findByPhone = async function (phone) {
-  return await this.findOne({ phone });
-};
-
-export const User = mongoose.model("User", userSchema);
+export const User = mongoose.models.User || mongoose.model("User", userSchema);
