@@ -5,6 +5,7 @@ import {
   createParcelBooking,
   findParcelForUser,
   generateParcelQrCode,
+  getParcelTrackingByCode,
   getStatusHistory,
   getTrackingFeed,
   listCustomerParcels,
@@ -61,6 +62,15 @@ export const parcelTracking = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     message: "Tracking feed",
     data: feed,
+  });
+});
+
+export const parcelTrackingByCode = catchAsync(async (req, res) => {
+  const details = await getParcelTrackingByCode(req.params.trackingCode, req.user);
+  return sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: "Parcel tracking detail",
+    data: details,
   });
 });
 

@@ -6,6 +6,7 @@ import {
   adminUsersList,
   assignParcelAgent,
   dashboardMetrics,
+  updateUserAccount,
 } from "../services/admin.service.js";
 import { updateParcelStatus } from "../services/parcel.service.js";
 
@@ -67,6 +68,20 @@ export const adminUsers = catchAsync(async (req, res) => {
     message: "Users fetched",
     data,
     meta,
+  });
+});
+
+export const adminUpdateUser = catchAsync(async (req, res) => {
+  const user = await updateUserAccount({
+    userId: req.params.id,
+    role: req.body.role,
+    isActive: req.body.isActive,
+    actorId: req.user._id,
+  });
+  return sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: "User updated",
+    data: user,
   });
 });
 

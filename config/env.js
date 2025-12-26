@@ -59,6 +59,8 @@ const envSchema = z.object({
 
   CLIENT_URL: z.string().transform(clean).optional(),
   SOCKET_ALLOWED_ORIGINS: z.string().transform(clean).optional(),
+  SMS_WEBHOOK_URL: z.string().transform(clean).optional(),
+  SMS_WEBHOOK_TOKEN: z.string().transform(clean).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

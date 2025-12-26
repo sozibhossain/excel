@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import AppError from "../errors/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
 import env from "../config/env.js";
-import { User, RoleEnum, LanguageEnum } from "../model/user.model.js";
+import { User, LanguageEnum } from "../model/user.model.js";
 import { RefreshToken } from "../model/refreshToken.model.js";
 import { hashPassword, verifyPassword, hashToken } from "../utils/crypto.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/tokens.js";
@@ -15,13 +15,6 @@ const sanitizeUser = (userDoc) => {
   delete user.passwordHash;
   delete user.deletedAt;
   return user;
-};
-
-const ensureRolePermissions = (requestedRole, actorRole) => {
-  if (!requestedRole || requestedRole === "CUSTOMER") return;
-  if (actorRole !== "ADMIN") {
-    throw new AppError(httpStatus.FORBIDDEN, "Only admins can create privileged accounts");
-  }
 };
 
 const createSession = async (user) => {
@@ -40,9 +33,8 @@ const createSession = async (user) => {
 };
 
 export const register = catchAsync(async (req, res) => {
-  const normalizedRole = (req.body.role || "CUSTOMER").toUpperCase();
   const normalizedLanguage = (req.body.language || "EN").toUpperCase();
-  ensureRolePermissions(normalizedRole, req.user?.role);
+  const normalizedRole = "CUSTOMER";
 
   const email = (req.body.email || "").trim().toLowerCase();
   if (!email) {
@@ -54,9 +46,6 @@ export const register = catchAsync(async (req, res) => {
     throw new AppError(httpStatus.CONFLICT, "User already exists with this email");
   }
 
-  if (!RoleEnum.includes(normalizedRole)) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Invalid role supplied");
-  }
   if (!LanguageEnum.includes(normalizedLanguage)) {
     throw new AppError(httpStatus.BAD_REQUEST, "Invalid language supplied");
   }

@@ -58,6 +58,7 @@ app.use(notFound);
 io.on("connection", (socket) => {
   console.log("Socket connected", socket.id);
   socket.on("join:parcel", (parcelId) => parcelId && socket.join(`parcel:${parcelId}`));
+  socket.on("join:user", (userId) => userId && socket.join(`user:${userId}`));
   socket.on("join:customer", (customerId) =>
     customerId && socket.join(`customer:${customerId}`)
   );

@@ -7,8 +7,9 @@ import { Address } from "../model/address.model.js";
 import { ParcelStatusHistory } from "../model/parcelStatusHistory.model.js";
 import { TrackingPoint } from "../model/trackingPoint.model.js";
 import { buildPaginationMeta } from "../utils/pagination.js";
-import { emitParcelStatus, emitTrackingPoint } from "../sockets/emitter.js";
+import { emitParcelStatus, emitTrackingPoint, emitUserNotification } from "../sockets/emitter.js";
 import { AuditLog } from "../model/auditLog.model.js";
+import { notifyParcelEvent } from "./notification.service.js";
 
 const generateTrackingCode = () =>
   `PKL-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
@@ -16,8 +17,8 @@ const generateTrackingCode = () =>
 const parcelInclude = [
   { path: "pickupAddressId", model: "Address" },
   { path: "deliveryAddressId", model: "Address" },
-  { path: "customerId", model: "User", select: "name email" },
-  { path: "assignedAgentId", model: "User", select: "name email" },
+  { path: "customerId", model: "User", select: "name email phone language" },
+  { path: "assignedAgentId", model: "User", select: "name email phone" },
 ];
 
 const ensureParcelAccess = (parcel, user) => {
@@ -76,6 +77,11 @@ export const createParcelBooking = async (customerId, payload) => {
   });
 
   await parcel.populate(parcelInclude);
+  await notifyParcelEvent({
+    parcel,
+    templateKey: "PARCEL_BOOKED",
+    context: { scheduledPickupAt: parcel.scheduledPickupAt },
+  });
   return parcel;
 };
 
@@ -199,8 +205,49 @@ export const updateParcelStatus = async ({ parcelId, nextStatus, actor, note }) 
     payload: { status: nextStatus, note },
   });
 
+  if (actor.role === "AGENT") {
+    emitUserNotification({
+      userId: parcel.customerId.toString(),
+      role: "CUSTOMER",
+      payload: {
+        type: "PARCEL_STATUS_UPDATED",
+        message: `Parcel ${parcel.trackingCode} is now ${nextStatus}`,
+        parcelId: parcel._id.toString(),
+        trackingCode: parcel.trackingCode,
+        status: nextStatus,
+        note,
+      },
+    });
+  }
+
   await parcel.populate(parcelInclude);
+  await notifyParcelEvent({
+    parcel,
+    templateKey: "PARCEL_STATUS_UPDATED",
+    context: { status: nextStatus, note },
+  });
   return parcel;
+};
+
+export const getParcelTrackingByCode = async (trackingCode, user) => {
+  const parcel = await Parcel.findOne({ trackingCode }).populate(parcelInclude);
+  if (!parcel) {
+    throw new AppError(httpStatus.NOT_FOUND, "Parcel not found");
+  }
+  ensureParcelAccess(parcel, user);
+  const [history, trackingPoints] = await Promise.all([
+    ParcelStatusHistory.find({ parcelId: parcel._id }).sort({ createdAt: -1 }),
+    TrackingPoint.find({ parcelId: parcel._id }).sort({ createdAt: -1 }).limit(50),
+  ]);
+
+  return {
+    parcel,
+    history,
+    tracking: {
+      latest: trackingPoints[0] ?? null,
+      history: trackingPoints,
+    },
+  };
 };
 
 export const generateParcelQrCode = async (parcelId, user) => {

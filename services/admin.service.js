@@ -2,10 +2,20 @@ import httpStatus from "http-status";
 import AppError from "../errors/AppError.js";
 import { Parcel } from "../model/parcel.model.js";
 import { buildPaginationMeta } from "../utils/pagination.js";
-import { User } from "../model/user.model.js";
+import { User, RoleEnum } from "../model/user.model.js";
 import { ParcelStatusHistory } from "../model/parcelStatusHistory.model.js";
 import { AuditLog } from "../model/auditLog.model.js";
-import { emitParcelStatus } from "../sockets/emitter.js";
+import { emitParcelStatus, emitUserNotification } from "../sockets/emitter.js";
+
+const parseBoolean = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+};
 
 export const adminParcelList = async ({
   page,
@@ -70,7 +80,80 @@ export const assignParcelAgent = async ({ parcelId, agentId, actorId }) => {
     payload: { status: "ASSIGNED" },
   });
 
+  emitUserNotification({
+    userId: agent._id.toString(),
+    role: agent.role,
+    payload: {
+      type: "PARCEL_ASSIGNED",
+      message: `New parcel assigned (${parcel.trackingCode})`,
+      parcelId: parcel._id.toString(),
+      trackingCode: parcel.trackingCode,
+    },
+  });
+
   return parcel;
+};
+
+export const updateUserAccount = async ({ userId, role, isActive, actorId }) => {
+  if (role === undefined && isActive === undefined) {
+    throw new AppError(httpStatus.BAD_REQUEST, "role or isActive is required");
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new AppError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  const updates = {};
+
+  if (role !== undefined) {
+    if (typeof role !== "string") {
+      throw new AppError(httpStatus.BAD_REQUEST, "role must be a string");
+    }
+    const normalizedRole = role.toUpperCase();
+    if (!RoleEnum.includes(normalizedRole)) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Invalid role supplied");
+    }
+    if (user.role !== normalizedRole) {
+      user.role = normalizedRole;
+      updates.role = normalizedRole;
+    }
+  }
+
+  if (isActive !== undefined) {
+    const normalizedActive = parseBoolean(isActive);
+    if (normalizedActive === undefined) {
+      throw new AppError(httpStatus.BAD_REQUEST, "isActive must be a boolean value");
+    }
+    if (user.isActive !== normalizedActive) {
+      user.isActive = normalizedActive;
+      updates.isActive = normalizedActive;
+    }
+  }
+
+  if (!Object.keys(updates).length) {
+    throw new AppError(httpStatus.BAD_REQUEST, "No changes detected for user");
+  }
+
+  await user.save();
+
+  await AuditLog.create({
+    actorId,
+    action: "USER_ACCOUNT_UPDATED",
+    details: { userId, ...updates },
+  });
+
+  emitUserNotification({
+    userId: user._id.toString(),
+    role: user.role,
+    payload: {
+      type: "USER_ACCOUNT_UPDATED",
+      message: "Your account settings were updated by an administrator",
+      data: { role: user.role, isActive: user.isActive },
+    },
+  });
+
+  return user;
 };
 
 export const adminUsersList = async ({ page, limit, role }) => {

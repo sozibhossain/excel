@@ -8,12 +8,14 @@ import {
   parcelQrCode,
   parcelStatusHistory,
   parcelTracking,
+  parcelTrackingByCode,
 } from "../controller/parcel.controller.js";
 
 const router = express.Router();
 
 router.post("/", protect(), rbac("CUSTOMER"), createParcel);
 router.get("/my", protect(), rbac("CUSTOMER"), myParcels);
+router.get("/tracking-code/:trackingCode", protect(), parcelTrackingByCode);
 router.get("/:id", protect(), parcelDetail);
 router.get("/:id/status-history", protect(), parcelStatusHistory);
 router.get("/:id/track", protect(), parcelTracking);
