@@ -35,7 +35,7 @@ const parcelSchema = new Schema(
   { timestamps: true }
 );
 
-parcelSchema.index({ trackingCode: 1 }, { unique: true });
+// parcelSchema.index({ trackingCode: 1 }, { unique: true });
 parcelSchema.index({ customerId: 1, createdAt: -1 });
 parcelSchema.index({ assignedAgentId: 1, status: 1 });
 

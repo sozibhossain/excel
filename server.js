@@ -41,7 +41,7 @@ app.use(morgan("tiny"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(rateLimitMiddleware);
+// app.use(rateLimitMiddleware);
 app.use(localeMiddleware);
 
 app.use("/public", express.static("public"));

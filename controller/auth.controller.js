@@ -44,6 +44,11 @@ export const register = catchAsync(async (req, res) => {
   const normalizedLanguage = (req.body.language || "EN").toUpperCase();
   ensureRolePermissions(normalizedRole, req.user?.role);
 
+  const email = (req.body.email || "").trim().toLowerCase();
+  if (!email) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Email is required");
+  }
+
   const existing = await User.findOne({ email });
   if (existing) {
     throw new AppError(httpStatus.CONFLICT, "User already exists with this email");
@@ -71,6 +76,7 @@ export const register = catchAsync(async (req, res) => {
     data: { user: sanitizeUser(user) },
   });
 });
+
 
 export const login = catchAsync(async (req, res) => {
   const { email, password } = req.body;
