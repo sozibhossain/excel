@@ -5,6 +5,8 @@ import {
   adminParcelList,
   adminUsersList,
   assignParcelAgent,
+  deleteParcelRecord,
+  deleteUserAccount,
   dashboardMetrics,
   updateUserAccount,
 } from "../services/admin.service.js";
@@ -82,6 +84,30 @@ export const adminUpdateUser = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     message: "User updated",
     data: user,
+  });
+});
+
+export const adminDeleteUser = catchAsync(async (req, res) => {
+  const user = await deleteUserAccount({
+    userId: req.params.id,
+    actorId: req.user._id,
+  });
+  return sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: "User removed",
+    data: user,
+  });
+});
+
+export const adminDeleteParcel = catchAsync(async (req, res) => {
+  const parcel = await deleteParcelRecord({
+    parcelId: req.params.id,
+    actorId: req.user._id,
+  });
+  return sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: "Parcel removed",
+    data: parcel,
   });
 });
 

@@ -7,9 +7,9 @@ import { Address } from "../model/address.model.js";
 import { ParcelStatusHistory } from "../model/parcelStatusHistory.model.js";
 import { TrackingPoint } from "../model/trackingPoint.model.js";
 import { buildPaginationMeta } from "../utils/pagination.js";
-import { emitParcelStatus, emitTrackingPoint, emitUserNotification } from "../sockets/emitter.js";
+import { emitParcelStatus, emitTrackingPoint } from "../sockets/emitter.js";
 import { AuditLog } from "../model/auditLog.model.js";
-import { notifyParcelEvent } from "./notification.service.js";
+import { createUserNotification, notifyParcelEvent } from "./notification.service.js";
 
 const generateTrackingCode = () =>
   `PKL-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
@@ -93,7 +93,7 @@ export const listCustomerParcels = async ({
   dateFrom,
   dateTo,
 }) => {
-  const filters = { customerId };
+  const filters = { customerId, deletedAt: null };
   if (status) filters.status = status;
   if (dateFrom || dateTo) {
     filters.createdAt = {};
@@ -115,7 +115,7 @@ export const listCustomerParcels = async ({
 
 export const findParcelForUser = async (id, user) => {
   const parcel = await Parcel.findById(id).populate(parcelInclude);
-  if (!parcel) {
+  if (!parcel || parcel.deletedAt) {
     throw new AppError(httpStatus.NOT_FOUND, "Parcel not found");
   }
   ensureParcelAccess(parcel, user);
@@ -165,7 +165,7 @@ const canTransition = (current, next) => {
 
 export const updateParcelStatus = async ({ parcelId, nextStatus, actor, note }) => {
   const parcel = await Parcel.findById(parcelId);
-  if (!parcel) {
+  if (!parcel || parcel.deletedAt) {
     throw new AppError(httpStatus.NOT_FOUND, "Parcel not found");
   }
   if (actor.role === "AGENT") {
@@ -206,12 +206,13 @@ export const updateParcelStatus = async ({ parcelId, nextStatus, actor, note }) 
   });
 
   if (actor.role === "AGENT") {
-    emitUserNotification({
-      userId: parcel.customerId.toString(),
+    await createUserNotification({
+      userId: parcel.customerId,
       role: "CUSTOMER",
-      payload: {
-        type: "PARCEL_STATUS_UPDATED",
-        message: `Parcel ${parcel.trackingCode} is now ${nextStatus}`,
+      type: "PARCEL_STATUS_UPDATED",
+      title: `Parcel is now ${nextStatus}`,
+      body: `Parcel ${parcel.trackingCode} is now ${nextStatus}`,
+      data: {
         parcelId: parcel._id.toString(),
         trackingCode: parcel.trackingCode,
         status: nextStatus,
@@ -230,7 +231,7 @@ export const updateParcelStatus = async ({ parcelId, nextStatus, actor, note }) 
 };
 
 export const getParcelTrackingByCode = async (trackingCode, user) => {
-  const parcel = await Parcel.findOne({ trackingCode }).populate(parcelInclude);
+  const parcel = await Parcel.findOne({ trackingCode, deletedAt: null }).populate(parcelInclude);
   if (!parcel) {
     throw new AppError(httpStatus.NOT_FOUND, "Parcel not found");
   }

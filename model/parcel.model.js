@@ -30,7 +30,7 @@ const parcelSchema = new Schema(
     failureReason: { type: String },
     qrCodeData: { type: String },
     barcodeData: { type: String },
-    deletedAt: { type: Date },
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

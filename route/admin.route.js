@@ -7,6 +7,8 @@ import {
   adminUsers,
   assignAgent,
   adminUpdateUser,
+  adminDeleteUser,
+  adminDeleteParcel,
   metrics,
 } from "../controller/admin.controller.js";
 import { bookingsCsv, bookingsPdf } from "../controller/reports.controller.js";
@@ -16,10 +18,12 @@ const router = express.Router();
 router.use(protect(), rbac("ADMIN"));
 
 router.get("/parcels", adminParcels);
-router.post("/parcels/:id/assign-agent", assignAgent);
+router.patch("/parcels/:id/assign-agent", assignAgent);
 router.patch("/parcels/:id/status", adminStatusUpdate);
+router.delete("/parcels/:id", adminDeleteParcel);
 router.get("/users", adminUsers);
 router.patch("/users/:id", adminUpdateUser);
+router.delete("/users/:id", adminDeleteUser);
 router.get("/metrics/dashboard", metrics);
 router.get("/reports/bookings.csv", bookingsCsv);
 router.get("/reports/bookings.pdf", bookingsPdf);

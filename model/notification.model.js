@@ -1,36 +1,47 @@
-import mongoose from "mongoose";
+import mongoose, { Schema } from "mongoose";
+import { RoleEnum } from "./user.model.js";
 
-const notificationSchema = new mongoose.Schema(
+const notificationSchema = new Schema(
   {
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-    chatId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Chat",
+    role: {
+      type: String,
+      enum: RoleEnum,
       required: true,
     },
-    messageId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Message",
-      required: true,
-    },
-    content: {
+    type: {
       type: String,
       required: true,
+    },
+    title: {
+      type: String,
+      required: true,
+    },
+    body: {
+      type: String,
+    },
+    data: {
+      type: Schema.Types.Mixed,
+      default: {},
     },
     isRead: {
       type: Boolean,
       default: false,
     },
-    createdAt: {
+    readAt: {
       type: Date,
-      default: Date.now,
+      default: null,
     },
   },
   { timestamps: true }
 );
 
-export const Notification = mongoose.model("Notification", notificationSchema);
+notificationSchema.index({ userId: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, isRead: 1 });
+
+export const Notification =
+  mongoose.models.Notification || mongoose.model("Notification", notificationSchema);
