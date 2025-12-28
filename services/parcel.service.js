@@ -24,12 +24,15 @@ const parcelInclude = [
 const ensureParcelAccess = (parcel, user) => {
   if (!parcel) return;
   if (user.role === "ADMIN") return;
-  if (user.role === "CUSTOMER" && parcel.customerId.toString() !== user._id.toString()) {
+  console.log(parcel)
+  console.log(user)
+  if (user.role === "CUSTOMER" && parcel.customerId._id.toString() !== user._id.toString()) {
     throw new AppError(httpStatus.FORBIDDEN, "Parcel not available for this user");
   }
+
   if (
     user.role === "AGENT" &&
-    (!parcel.assignedAgentId || parcel.assignedAgentId.toString() !== user._id.toString())
+    (!parcel.assignedAgentId || parcel.assignedAgentId._id.toString() !== user._id.toString())
   ) {
     throw new AppError(httpStatus.FORBIDDEN, "Parcel not assigned to this agent");
   }
