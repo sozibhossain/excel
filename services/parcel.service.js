@@ -76,7 +76,12 @@ export const createParcelBooking = async (customerId, payload) => {
     parcelId: parcel._id.toString(),
     customerId: customerId.toString(),
     agentId: null,
-    payload: { status: "BOOKED" },
+    payload: {
+      trackingCode: parcel.trackingCode,
+      status: "BOOKED",
+      note: "Booking created",
+      updatedAt: parcel.createdAt instanceof Date ? parcel.createdAt.toISOString() : undefined,
+    },
   });
 
   await parcel.populate(parcelInclude);
@@ -205,7 +210,14 @@ export const updateParcelStatus = async ({ parcelId, nextStatus, actor, note }) 
     parcelId: parcel._id.toString(),
     customerId: parcel.customerId.toString(),
     agentId: parcel.assignedAgentId?.toString(),
-    payload: { status: nextStatus, note },
+    payload: {
+      trackingCode: parcel.trackingCode,
+      status: nextStatus,
+      note,
+      updatedAt: parcel.updatedAt instanceof Date ? parcel.updatedAt.toISOString() : undefined,
+      deliveredAt: parcel.deliveredAt instanceof Date ? parcel.deliveredAt.toISOString() : undefined,
+      failureReason: parcel.failureReason ?? undefined,
+    },
   });
 
   if (actor.role === "AGENT") {

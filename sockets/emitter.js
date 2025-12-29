@@ -6,11 +6,12 @@ export const registerSocketServer = (io) => {
 };
 
 export const emitParcelStatus = ({ parcelId, customerId, agentId, payload }) => {
-  if (!ioInstance) return;
-  ioInstance.to(`parcel:${parcelId}`).emit("parcel:status", payload);
-  ioInstance.to(`customer:${customerId}`).emit("parcel:status", payload);
+  if (!ioInstance || !parcelId) return;
+  const enrichedPayload = { parcelId, ...(payload ?? {}) };
+  ioInstance.to(`parcel:${parcelId}`).emit("parcel:status", enrichedPayload);
+  ioInstance.to(`customer:${customerId}`).emit("parcel:status", enrichedPayload);
   if (agentId) {
-    ioInstance.to(`agent:${agentId}`).emit("parcel:status", payload);
+    ioInstance.to(`agent:${agentId}`).emit("parcel:status", enrichedPayload);
   }
 };
 
