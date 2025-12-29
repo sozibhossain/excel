@@ -28,8 +28,6 @@ yarn-error.log*
 # =========================
 # Environment variables
 # =========================
-.env
-.env.*
 !.env.example
 
 # =========================
@@ -96,3 +94,4 @@ $RECYCLE.BIN/
 *.zip
 *.tar
 *.tar.gz
+config.bat

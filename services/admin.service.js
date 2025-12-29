@@ -80,7 +80,12 @@ export const assignParcelAgent = async ({ parcelId, agentId, actorId }) => {
     parcelId: parcel._id.toString(),
     customerId: parcel.customerId.toString(),
     agentId: parcel.assignedAgentId?.toString(),
-    payload: { status: "ASSIGNED" },
+    payload: {
+      trackingCode: parcel.trackingCode,
+      status: "ASSIGNED",
+      note: `Assigned to ${agent.name}`,
+      updatedAt: parcel.updatedAt instanceof Date ? parcel.updatedAt.toISOString() : undefined,
+    },
   });
 
   await createUserNotification({
@@ -255,7 +260,12 @@ export const deleteParcelRecord = async ({ parcelId, actorId }) => {
     parcelId: parcel._id.toString(),
     customerId: parcel.customerId.toString(),
     agentId: previousAgentId ?? undefined,
-    payload: { status: "CANCELLED" },
+    payload: {
+      trackingCode: parcel.trackingCode,
+      status: "CANCELLED",
+      note: "Parcel deleted by administrator",
+      updatedAt: parcel.updatedAt instanceof Date ? parcel.updatedAt.toISOString() : undefined,
+    },
   });
 
   return parcel;
